@@ -1,0 +1,17 @@
+package com.thienbao.laboratorymanagement.backend.common.constant;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public final class ClientConstant {
+
+	public static final List<String> ALLOWED_ORIGIN_LIST = new ArrayList<>(
+			List.of(
+					"http://localhost:5173",
+					"http://localhost:7070",
+					"https://iclass.website",
+					"https://class-management-system-frontend.fly.dev"
+			)
+	);
+
+}

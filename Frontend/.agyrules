@@ -1,0 +1,11 @@
+# 1. Bối cảnh dự án & Phạm vi (Project Context)
+- NGUỒN NGỮ CẢNH: Luôn tham chiếu file `laboratory-management-overview.md` để nắm bối cảnh ứng dụng và phạm vi màn hình.
+- CẤM SUY DIỄN: Chỉ tập trung vào thiết kế UI/UX. Tuyệt đối không tự suy diễn quy trình nghiệp vụ, logic phân quyền hay hành vi backend.
+
+# 2. Quy chuẩn thiết kế giao diện (UI Design Guidelines)
+- NGUỒN THIẾT KẾ: BẮT BUỘC đọc file `web-ui-design-guidelines.md` trước khi tạo/sửa file frontend.
+- PHONG CÁCH: Bám sát tông màu xanh lá, font Inter, và đảm bảo hiển thị đầy đủ các trạng thái UI chuẩn (loading, success, error, empty, disabled).
+
+# 3. Ràng buộc Kỹ thuật & Hành vi (STRICT CONSTRAINTS)
+- CÔNG NGHỆ CSS: BẮT BUỘC sử dụng Tailwind CSS cho mọi thao tác styling. Phải ánh xạ các design token (màu sắc, spacing, typography) vào class của Tailwind. Tuyệt đối không sử dụng inline style.
+- GIỚI HẠN TẦM NHÌN (NO AUTO-SCAN): TUYỆT ĐỐI KHÔNG tự động quét, đọc, suy đoán hoặc tìm kiếm bất kỳ file/thư mục nào xung quanh. CHỈ ĐƯỢC PHÉP truy cập ngữ cảnh từ các file được người dùng chỉ định trực tiếp bằng cú pháp `@` trong câu lệnh prompt.

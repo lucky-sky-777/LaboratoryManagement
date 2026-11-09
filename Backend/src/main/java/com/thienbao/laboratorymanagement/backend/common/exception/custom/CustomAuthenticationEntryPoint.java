@@ -1,0 +1,41 @@
+package com.thienbao.laboratorymanagement.backend.common.exception.custom;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.thienbao.laboratorymanagement.backend.domain.auth.internal.dto.ResponseDTO;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.jspecify.annotations.NonNull;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+
+@Component
+public class CustomAuthenticationEntryPoint implements AuthenticationEntryPoint {
+
+	@Override
+	public void commence(
+			@NonNull HttpServletRequest httpServletRequest,
+			@NonNull HttpServletResponse httpServletResponse,
+			@NonNull AuthenticationException authenticationException
+	) throws IOException {
+		ObjectMapper objectMapper = JsonMapper.builder()
+				.addModule(new JavaTimeModule())
+				.build();
+
+		httpServletResponse.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+		httpServletResponse.setContentType("application/json;charset=UTF-8");
+		httpServletResponse.setCharacterEncoding("UTF-8");
+
+		ResponseDTO<?> responseDTO = ResponseDTO.fail(
+				httpServletResponse.getStatus(),
+				authenticationException.getMessage()
+		);
+
+		httpServletResponse.getWriter().write(objectMapper.writeValueAsString(responseDTO));
+	}
+
+}

@@ -1,0 +1,39 @@
+package com.thienbao.laboratorymanagement.backend.common.security;
+
+import com.thienbao.laboratorymanagement.backend.common.constant.WarningConstant;
+import com.thienbao.laboratorymanagement.backend.common.exception.entity.GlobalException;
+import com.thienbao.laboratorymanagement.backend.domain.auth.internal.service.AuthService;
+import com.thienbao.laboratorymanagement.backend.domain.auth.internal.service.InvalidatedAccessTokenService;
+import com.thienbao.laboratorymanagement.backend.domain.auth.internal.service.JwtService;
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
+import lombok.experimental.FieldDefaults;
+import org.springframework.security.core.Authentication;
+import org.springframework.stereotype.Component;
+
+@SuppressWarnings(value = {WarningConstant.UNUSED})
+@FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
+@RequiredArgsConstructor
+@Component("TokenSecurity")
+public class TokenSecurity {
+
+	AuthService authService;
+	JwtService jwtService;
+	InvalidatedAccessTokenService invalidatedAccessTokenService;
+
+	public boolean isValid() {
+		Authentication authentication = authService.getAuthentication();
+		String jti = jwtService.extractJtiFromAuthentication(authentication);
+
+		return isValid(jti);
+	}
+
+	private boolean isValid(String jti) {
+		if (invalidatedAccessTokenService.isInvalidated(jti)) {
+			throw new GlobalException(GlobalException.Type.INVALID_AUTHENTICATION, "Unauthorized");
+		}
+
+		return true;
+	}
+
+}

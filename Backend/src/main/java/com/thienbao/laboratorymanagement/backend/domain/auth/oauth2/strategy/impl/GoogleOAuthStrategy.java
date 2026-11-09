@@ -1,0 +1,45 @@
+package com.thienbao.laboratorymanagement.backend.domain.auth.oauth2.strategy.impl;
+
+import com.thienbao.laboratorymanagement.backend.domain.auth.internal.dto.signin.SignInResponseDto;
+import com.thienbao.laboratorymanagement.backend.domain.auth.oauth2.entity.GoogleUser;
+import com.thienbao.laboratorymanagement.backend.domain.auth.oauth2.env.GoogleEnv;
+import com.thienbao.laboratorymanagement.backend.domain.auth.oauth2.service.GoogleOAuthService;
+import com.thienbao.laboratorymanagement.backend.domain.auth.oauth2.strategy.OAuthStrategy;
+import com.thienbao.laboratorymanagement.backend.domain.auth.internal.service.AuthService;
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
+import lombok.experimental.FieldDefaults;
+import org.springframework.stereotype.Service;
+
+@FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
+@RequiredArgsConstructor
+@Service(OAuthStrategy.GOOGLE)
+public class GoogleOAuthStrategy implements OAuthStrategy {
+
+	AuthService authService;
+	GoogleEnv googleEnv;
+	GoogleOAuthService googleOAuthService;
+
+	@Override
+	public String getName() {
+		return GOOGLE;
+	}
+
+	@Override
+	public String getAuthUrl(String state) {
+		return String.format(
+				"%s?client_id=%s&redirect_uri=%s&response_type=code&scope=email profile&access_type=offline&state=%s",
+				googleEnv.AUTH_URL,
+				googleEnv.CLIENT_ID,
+				googleEnv.REDIRECT_URI,
+				state
+		);
+	}
+
+	@Override
+	public SignInResponseDto auth(String accessToken) {
+		GoogleUser googleUser = googleOAuthService.getUserInfo(accessToken);
+		return authService.signInGoogle(googleUser);
+	}
+
+}
