@@ -220,11 +220,20 @@ public class AuthService {
 
 	public void changePassword(Authentication authentication, ChangePasswordRequestDto request) {
 		String username = jwtService.extractUsernameFromAuthentication(authentication);
+		User user = userService.findByUsernameOrThrow(username);
+
+		if (user.getPasswordHash() == null) {
+			throw new GlobalException(GlobalException.Type.INVALID_REQUEST, "Tài khoản đăng nhập qua " + user.getProvider() + " không sử dụng mật khẩu");
+		}
+
+		if (request.getNewPassword() == null || request.getNewPassword().trim().length() < 6) {
+			throw new GlobalException(GlobalException.Type.INVALID_REQUEST, "Mật khẩu mới phải có ít nhất 6 ký tự");
+		}
 
 		try {
 			authenticate(username, request.getOldPassword());
 		} catch (AuthenticationException e) {
-			throw new GlobalException(GlobalException.Type.INVALID_AUTHENTICATION, "Mật khẩu cũ không đúng");
+			throw new GlobalException(GlobalException.Type.INVALID_AUTHENTICATION, "Mật khẩu cũ không chính xác");
 		}
 
 		userService.updatePassword(username, request.getNewPassword());

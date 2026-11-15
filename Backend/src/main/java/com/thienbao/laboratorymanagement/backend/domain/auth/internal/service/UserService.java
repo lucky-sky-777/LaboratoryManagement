@@ -1,6 +1,7 @@
 package com.thienbao.laboratorymanagement.backend.domain.auth.internal.service;
 
 import com.thienbao.laboratorymanagement.backend.domain.auth.internal.dto.request.SignUpRequestDto;
+import com.thienbao.laboratorymanagement.backend.domain.auth.internal.dto.request.UpdateProfileRequestDto;
 import com.thienbao.laboratorymanagement.backend.domain.auth.internal.entity.User;
 import com.thienbao.laboratorymanagement.backend.common.exception.entity.GlobalException;
 import com.thienbao.laboratorymanagement.backend.domain.auth.internal.mapper.UserMapper;
@@ -11,6 +12,9 @@ import lombok.experimental.FieldDefaults;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Objects;
+import java.util.regex.Pattern;
 
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 @RequiredArgsConstructor
@@ -41,6 +45,39 @@ public class UserService {
 
 		User user = userMapper.toUser(request);
 		user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+		if (user.getProvider() == null) {
+			user.setProvider(User.Provider.INTERNAL);
+		}
+		if (user.getProvider() != User.Provider.INTERNAL) {
+			user.setEmailVerified(true);
+		}
+
+		return save(user);
+	}
+
+	private static final Pattern EMAIL_PATTERN = Pattern.compile("^[A-Za-z0-9+_.-]+@(.+)$");
+
+	@Transactional
+	public User updateProfile(Long userId, UpdateProfileRequestDto request) {
+		User user = findByIdOrThrow(userId);
+
+		if (request.getDisplayName() != null && !request.getDisplayName().trim().isEmpty()) {
+			user.setDisplayName(request.getDisplayName().trim());
+		}
+
+		if (request.getEmail() != null) {
+			String newEmail = request.getEmail().trim();
+			if (!Objects.equals(user.getEmail(), newEmail)) {
+				if (user.getProvider() != null && user.getProvider() != User.Provider.INTERNAL) {
+					throw new GlobalException(GlobalException.Type.INVALID_REQUEST, "Tài khoản liên kết mạng xã hội không thể thay đổi địa chỉ email");
+				}
+				if (!newEmail.isEmpty() && !EMAIL_PATTERN.matcher(newEmail).matches()) {
+					throw new GlobalException(GlobalException.Type.INVALID_REQUEST, "Định dạng email không hợp lệ");
+				}
+				user.setEmail(newEmail.isEmpty() ? null : newEmail);
+				user.setEmailVerified(false);
+			}
+		}
 
 		return save(user);
 	}

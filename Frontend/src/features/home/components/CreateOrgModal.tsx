@@ -148,7 +148,7 @@ export function CreateOrgModal({
                   {privacy === "PUBLIC" && <span className="h-2 w-2 rounded-full bg-emerald-600" />}
                 </div>
                 <div>
-                  <div className="text-xs font-bold">PUBLIC (Công khai)</div>
+                  <div className="text-xs font-bold">Công khai</div>
                   <div className="text-[11px] text-slate-500 mt-0.5">
                     Bất kỳ người dùng nào có mã đều có thể tham gia.
                   </div>
@@ -168,7 +168,7 @@ export function CreateOrgModal({
                   {privacy === "PRIVATE" && <span className="h-2 w-2 rounded-full bg-emerald-600" />}
                 </div>
                 <div>
-                  <div className="text-xs font-bold">PRIVATE (Riêng tư)</div>
+                  <div className="text-xs font-bold">Riêng tư</div>
                   <div className="text-[11px] text-slate-500 mt-0.5">
                     Cần phê duyệt yêu cầu tham gia hoặc nhận lời mời.
                   </div>

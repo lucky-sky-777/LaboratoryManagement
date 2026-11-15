@@ -8,7 +8,10 @@ interface AuthContextType {
     user: UserProfile | null;
     isInitializing: boolean;
     signin: (credentials: SignInRequest) => Promise<UserProfile>;
+    loginWithTokens: (accessToken: string, refreshToken: string) => Promise<UserProfile>;
     signout: () => void;
+    updateUser: (updatedUser: UserProfile) => void;
+    refreshUserProfile: () => Promise<UserProfile>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -67,6 +70,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return await fetchUserProfile();
     };
 
+    // Luồng khi đăng nhập bằng OAuth (Google, Mezon) sau khi nhận được tokens
+    const loginWithTokens = useCallback(async (accessToken: string, refreshToken: string): Promise<UserProfile> => {
+        localStorage.setItem(ACCESS_TOKEN, accessToken);
+        localStorage.setItem(REFRESH_TOKEN, refreshToken);
+        return await fetchUserProfile();
+    }, [fetchUserProfile]);
+
     const signout = useCallback(async (): Promise<void> => {
 		try {
 			AuthApi.signOut();
@@ -83,8 +93,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 		}
 	}, []);
 
+    const updateUser = useCallback((updatedUser: UserProfile) => {
+        setUser(updatedUser);
+    }, []);
+
     return (
-        <AuthContext.Provider value={{ user, isInitializing, signin, signout }}>
+        <AuthContext.Provider value={{ user, isInitializing, signin, loginWithTokens, signout, updateUser, refreshUserProfile: fetchUserProfile }}>
             {children}
         </AuthContext.Provider>
     );

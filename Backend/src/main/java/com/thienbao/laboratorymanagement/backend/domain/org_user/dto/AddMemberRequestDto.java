@@ -1,0 +1,32 @@
+package com.thienbao.laboratorymanagement.backend.domain.org_user.dto;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.thienbao.laboratorymanagement.backend.common.annotation.DTO;
+import com.thienbao.laboratorymanagement.backend.domain.org_user.entity.OrganizationUser;
+import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import lombok.experimental.FieldDefaults;
+
+@FieldDefaults(level = AccessLevel.PRIVATE)
+@Setter
+@Getter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@DTO
+public class AddMemberRequestDto {
+
+	@JsonProperty(value = "user_id")
+	Long userId;
+
+	@JsonProperty(value = "username")
+	String username;
+
+	@JsonProperty(value = "role")
+	OrganizationUser.Role role;
+
+}

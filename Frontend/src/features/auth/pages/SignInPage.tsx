@@ -1,13 +1,16 @@
 import { useState, useRef, type SyntheticEvent, type ChangeEvent } from "react";
-import { useNavigate, useLocation, Navigate } from "react-router";
+import { useNavigate, useLocation, Navigate, Link } from "react-router";
 import { useAuth } from "../context/AuthContext";
 import { tokenStorage } from "../../../utils/TokenStorage";
 import { HttpError } from "../../../services/http/HttpError";
+import { GoogleSignInButton } from "../components/GoogleSignInButton";
 
 interface LocationState {
     from?: {
         pathname?: string;
     };
+    registered?: boolean;
+    prefillUsername?: string;
 }
 
 interface FieldErrors {
@@ -16,26 +19,30 @@ interface FieldErrors {
 }
 
 function SignInPage() {
-    const [username, setUsername] = useState("");
+    const location = useLocation();
+    const state = location.state as LocationState | null;
+
+    const [username, setUsername] = useState(state?.prefillUsername || "");
     const [password, setPassword] = useState("");
     const [showPassword, setShowPassword] = useState(false);
     const [generalError, setGeneralError] = useState("");
     const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
     const [loading, setLoading] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
+    const [successMessage] = useState(
+        state?.registered ? "Đăng ký tài khoản thành công! Vui lòng đăng nhập để tiếp tục." : ""
+    );
 
     const usernameInputRef = useRef<HTMLInputElement>(null);
     const passwordInputRef = useRef<HTMLInputElement>(null);
 
     const { signin } = useAuth();
     const navigate = useNavigate();
-    const location = useLocation();
 
     if (tokenStorage.hasTokens()) {
         return <Navigate to="/" replace />;
     }
 
-    const state = location.state as LocationState | null;
     const from = state?.from?.pathname || "/";
 
     const validateForm = (): boolean => {
@@ -141,6 +148,51 @@ function SignInPage() {
 
             {/* Login Card */}
             <div className="w-full max-w-md bg-white rounded-2xl shadow-sm border border-[#E2E8E4] p-6 sm:p-8">
+                {/* Google Sign In Button */}
+                <div className="mb-6">
+                    <GoogleSignInButton
+                        text="Đăng nhập với Google"
+                        disabled={loading || isSuccess}
+                    />
+                </div>
+
+                {/* Divider */}
+                <div className="relative mb-6">
+                    <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                        <div className="w-full border-t border-[#E2E8E4]"></div>
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                        <span className="bg-white px-3 text-[#8A948D] font-medium">
+                            hoặc đăng nhập bằng tài khoản
+                        </span>
+                    </div>
+                </div>
+
+                {/* Registration Success Banner */}
+                {successMessage && !isSuccess && !generalError && (
+                    <div
+                        role="status"
+                        aria-live="polite"
+                        className="mb-6 flex items-center gap-3 p-3.5 rounded-lg bg-[#DCFCE7] border border-green-200 text-[#166534] text-sm animate-in fade-in duration-200"
+                    >
+                        <svg
+                            className="w-5 h-5 shrink-0 text-green-600"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            strokeWidth="2"
+                            stroke="currentColor"
+                            aria-hidden="true"
+                        >
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+                            />
+                        </svg>
+                        <span className="font-medium text-xs sm:text-sm">{successMessage}</span>
+                    </div>
+                )}
+
                 {/* General Error Banner */}
                 {generalError && (
                     <div
@@ -386,7 +438,7 @@ function SignInPage() {
                         <button
                             type="submit"
                             disabled={loading || isSuccess}
-                            className="w-full h-11 px-4 flex items-center justify-center gap-2 rounded-lg text-sm font-medium text-white bg-green-600 hover:bg-green-700 active:bg-green-800 transition-colors duration-150 shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                            className="w-full h-11 px-4 flex items-center justify-center gap-2 rounded-lg text-sm font-medium text-white bg-green-600 hover:bg-green-700 active:bg-green-800 transition-colors duration-150 shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
                         >
                             {loading ? (
                                 <>
@@ -418,6 +470,17 @@ function SignInPage() {
                         </button>
                     </div>
                 </form>
+
+                {/* Don't have an account link */}
+                <div className="mt-6 pt-5 border-t border-[#E2E8E4] text-center text-sm text-[#647067]">
+                    Chưa có tài khoản?{" "}
+                    <Link
+                        to="/signup"
+                        className="font-medium text-green-600 hover:text-green-700 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 rounded-xs"
+                    >
+                        Đăng ký ngay
+                    </Link>
+                </div>
             </div>
 
             {/* Footer */}

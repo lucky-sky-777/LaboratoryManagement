@@ -11,7 +11,8 @@
 | password_hash | text | |
 | display_name | text | Tên hiển thị |
 | avatar_url | text | Url ảnh đại diện |
-| email | text | |
+| email | text | Địa chỉ email người dùng |
+| email_verified | boolean | Trạng thái xác thực email (mặc định: false) |
 | joined_at | timestamptz | Thời điểm tạo |
 
 ## 3.2. Bảng `organizations`
@@ -61,3 +62,15 @@
 | status | text | [PEDNING, APPROVED, REJECTED, CANCELLED] |
 | receiver_user_id | bigint | |
 | responded_at | timestamptz | |
+
+### 3.6. Bảng email_verifications
+
+| Cột | Kiểu dữ liệu | Mô tả |
+|---|---|---|
+| id | bigint | Khóa chính (auto increment) |
+| user_id | bigint | ID người dùng yêu cầu xác thực |
+| email | text | Địa chỉ email cần xác thực |
+| code | varchar(10) | Mã OTP xác thực (6 số) |
+| expires_at | timestamptz | Thời điểm hết hạn của mã xác thực (15 phút) |
+| verified | boolean | Trạng thái đã xác minh (mặc định: false) |
+| created_at | timestamptz | Thời điểm gửi mã |

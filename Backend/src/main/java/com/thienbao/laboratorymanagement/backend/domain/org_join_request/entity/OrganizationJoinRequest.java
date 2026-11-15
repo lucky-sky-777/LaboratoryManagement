@@ -1,4 +1,4 @@
-package com.thienbao.laboratorymanagement.backend.domain.organization_join_request.entity;
+package com.thienbao.laboratorymanagement.backend.domain.org_join_request.entity;
 
 import com.thienbao.laboratorymanagement.backend.domain.auth.internal.entity.User;
 import com.thienbao.laboratorymanagement.backend.domain.org.entity.Organization;
@@ -79,6 +79,38 @@ public class OrganizationJoinRequest {
 		if (status == null) {
 			status = Status.PENDING;
 		}
+	}
+
+	public boolean isPending() {
+		return Status.PENDING.equals(this.status);
+	}
+
+	public void approve(User actor) {
+		this.status = Status.APPROVED;
+		this.actor = actor;
+		this.actedAt = Instant.now();
+	}
+
+	public void reject(User actor, String rejectReason) {
+		this.status = Status.REJECTED;
+		this.actor = actor;
+		this.actedAt = Instant.now();
+		this.rejectReason = rejectReason;
+	}
+
+	public void cancel(User actor) {
+		this.status = Status.CANCELLED;
+		this.actor = actor;
+		this.actedAt = Instant.now();
+	}
+
+	public static OrganizationJoinRequest create(Organization organization, User creator, String message) {
+		return OrganizationJoinRequest.builder()
+				.organization(organization)
+				.creator(creator)
+				.message(message)
+				.status(Status.PENDING)
+				.build();
 	}
 
 }

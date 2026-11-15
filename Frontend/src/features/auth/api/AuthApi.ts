@@ -5,7 +5,13 @@ import type {
 	SignInRequest,
 	SignUpRequest,
 	SignInResponse,
+	SignUpResponse,
+	ExchangeOAuthCodeRequest,
 	UserProfile,
+	UpdateProfileRequest,
+	ChangePasswordRequest,
+	SendVerificationCodeRequest,
+	VerifyEmailRequest,
 } from "../types/AuthType";
 
 export const AuthApi = {
@@ -22,8 +28,21 @@ export const AuthApi = {
 	/**
 	 * Đăng ký tài khoản
 	 */
-	signUp(request: SignUpRequest): Promise<void> {
-		return HttpService.post<void>("/api/auth/signup", request);
+	signUp(request: SignUpRequest): Promise<ResponseDTO<SignUpResponse>> {
+		return HttpService.post<ResponseDTO<SignUpResponse>>("/api/auth/signup", request);
+	},
+
+	/**
+	 * Trao đổi OAuth authorization code lấy JWT token
+	 */
+	exchangeOAuth(
+		provider: string,
+		request: ExchangeOAuthCodeRequest,
+	): Promise<ResponseDTO<SignInResponse>> {
+		return HttpService.post<ResponseDTO<SignInResponse>>(
+			`/api/auth/${provider}/exchange`,
+			request,
+		);
 	},
 
 	/**
@@ -56,5 +75,33 @@ export const AuthApi = {
 	 */
 	validate(): Promise<void> {
 		return HttpService.post<void>("/api/auth/validate");
+	},
+
+	/**
+	 * Cập nhật thông tin cá nhân (tên hiển thị, email)
+	 */
+	updateProfile(request: UpdateProfileRequest): Promise<ResponseDTO<UserProfile>> {
+		return HttpService.put<ResponseDTO<UserProfile>>("/api/auth/profile", request);
+	},
+
+	/**
+	 * Đổi mật khẩu
+	 */
+	changePassword(request: ChangePasswordRequest): Promise<ResponseDTO<void>> {
+		return HttpService.post<ResponseDTO<void>>("/api/auth/change-password", request);
+	},
+
+	/**
+	 * Gửi mã xác thực email
+	 */
+	sendEmailVerification(request?: SendVerificationCodeRequest): Promise<ResponseDTO<string>> {
+		return HttpService.post<ResponseDTO<string>>("/api/auth/email/send-verification", request || {});
+	},
+
+	/**
+	 * Xác thực email bằng mã OTP
+	 */
+	verifyEmail(request: VerifyEmailRequest): Promise<ResponseDTO<UserProfile>> {
+		return HttpService.post<ResponseDTO<UserProfile>>("/api/auth/email/verify", request);
 	},
 };

@@ -10,6 +10,9 @@ interface HeaderProps {
   onSearchChange: (query: string) => void;
   onOpenCreateModal: () => void;
   onOpenJoinModal: () => void;
+  onNavigateHome?: () => void;
+  onNavigateSettings?: () => void;
+  onNavigateProfile?: () => void;
 }
 
 export function Header({
@@ -20,6 +23,9 @@ export function Header({
   onSearchChange,
   onOpenCreateModal,
   onOpenJoinModal,
+  onNavigateHome,
+  onNavigateSettings,
+  onNavigateProfile,
 }: HeaderProps) {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -77,7 +83,11 @@ export function Header({
         </button>
 
         {/* Brand Logo & Name */}
-        <div className="flex items-center gap-2.5 cursor-pointer select-none">
+        <div
+          onClick={onNavigateHome}
+          className="flex items-center gap-2.5 cursor-pointer select-none group"
+          title="Trang chủ phòng thí nghiệm"
+        >
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-sm shadow-emerald-500/20">
             <svg
               className="h-5 w-5"
@@ -297,6 +307,10 @@ export function Header({
               <div className="py-2 text-xs text-slate-600 space-y-1">
                 <button
                   type="button"
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    onNavigateProfile?.();
+                  }}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 hover:bg-slate-50 text-slate-700 transition-colors"
                 >
                   <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
@@ -306,6 +320,10 @@ export function Header({
                 </button>
                 <button
                   type="button"
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    onNavigateSettings?.();
+                  }}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 hover:bg-slate-50 text-slate-700 transition-colors"
                 >
                   <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">

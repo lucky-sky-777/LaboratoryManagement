@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
-import { useNavigate } from "react-router";
+/* eslint-disable react-hooks/set-state-in-effect */
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { useNavigate, useParams, useLocation } from "react-router";
 import { useAuth } from "../../auth/context/AuthContext";
 import { Header } from "../components/Header";
 import { Sidebar } from "../components/Sidebar";
@@ -7,33 +8,71 @@ import { OrganizationCard } from "../components/OrganizationCard";
 import { CreateOrgModal } from "../components/CreateOrgModal";
 import { JoinOrgModal } from "../components/JoinOrgModal";
 import { JoinRequestsModal } from "../components/JoinRequestsModal";
+import { EditOrgModal } from "../../organizations/components/EditOrgModal";
+import { ProfileView } from "../../auth/components/ProfileView";
 import {
-  initialOrganizations,
-  mockJoinRequests,
-} from "../data/mockOrganizations";
+  OrganizationDetailView,
+  type OrganizationDetailTab,
+} from "../../organizations/components/OrganizationDetailView";
+import { OrganizationApi } from "../../organizations/api/OrganizationApi";
+import { OrganizationUserApi } from "../../organizations/api/OrganizationUserApi";
+import { OrganizationJoinRequestApi } from "../../organizations/api/OrganizationJoinRequestApi";
 import type {
   OrganizationItemDTO,
   OrganizationJoinRequestEntity,
   OrganizationPrivacy,
+  OrganizationRole,
 } from "../types/organization";
 import { isManagerRole } from "../types/organization";
 
 type FilterTab = "all" | "managed" | "joined";
 type SortOption = "name" | "members" | "joined_at";
 
+const THEME_COLORS: Array<NonNullable<OrganizationItemDTO["theme_color"]>> = [
+  "emerald",
+  "blue",
+  "indigo",
+  "purple",
+  "amber",
+  "teal",
+];
+
+function getThemeForOrg(orgId: number): NonNullable<OrganizationItemDTO["theme_color"]> {
+  return THEME_COLORS[Math.abs(orgId) % THEME_COLORS.length];
+}
+
 function HomePage() {
   const { user, signout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { id, tab } = useParams<{ id?: string; tab?: string }>();
 
-  // Core State aligned with database schema
-  const [organizations, setOrganizations] = useState<OrganizationItemDTO[]>(initialOrganizations);
-  const [joinRequests, setJoinRequests] = useState<OrganizationJoinRequestEntity[]>(mockJoinRequests);
+  // Route-derived active states
+  const selectedOrgId = id ? Number(id) : null;
+  const activeView: "all" | "requests" | "settings" | "profile" = useMemo(() => {
+    if (location.pathname.startsWith("/requests")) return "requests";
+    if (location.pathname.startsWith("/settings")) return "settings";
+    if (location.pathname.startsWith("/profile")) return "profile";
+    return "all";
+  }, [location.pathname]);
+
+  const activeTab: OrganizationDetailTab = useMemo(() => {
+    if (tab === "members") return "members";
+    if (tab === "requests") return "requests";
+    return "overview";
+  }, [tab]);
+
+  // Core API State
+  const [organizations, setOrganizations] = useState<OrganizationItemDTO[]>([]);
+  const [directOrg, setDirectOrg] = useState<OrganizationItemDTO | null>(null);
+  const [joinRequests, setJoinRequests] = useState<OrganizationJoinRequestEntity[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Filters & Search
   const [searchQuery, setSearchQuery] = useState("");
   const [filterTab, setFilterTab] = useState<FilterTab>("all");
   const [privacyFilter, setPrivacyFilter] = useState<OrganizationPrivacy | "ALL">("ALL");
   const [sortBy, setSortBy] = useState<SortOption>("name");
-  const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null);
-  const [activeView, setActiveView] = useState<"all" | "requests" | "settings">("all");
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   // Modals & Feedback
@@ -41,110 +80,179 @@ function HomePage() {
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
   const [currentOrgForRequests, setCurrentOrgForRequests] = useState<OrganizationItemDTO | null>(null);
   const [isJoinRequestsModalOpen, setIsJoinRequestsModalOpen] = useState(false);
+
+  const [currentOrgForEdit, setCurrentOrgForEdit] = useState<OrganizationItemDTO | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const showToast = (message: string) => {
+  const showToast = useCallback((message: string) => {
     setToastMessage(message);
     setTimeout(() => {
       setToastMessage((prev) => (prev === message ? null : prev));
     }, 3500);
-  };
+  }, []);
 
   const handleLogout = async () => {
     await signout();
     navigate("/signin", { replace: true });
   };
 
+  /**
+   * Fetch all organizations and related join requests from real backend APIs
+   */
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      // 1. Fetch joined organizations
+      const joinedRes = await OrganizationUserApi.getJoinedOrganizations();
+      const memberships = (joinedRes.success && joinedRes.data) ? joinedRes.data : [];
+
+      // 2. Map into OrganizationItemDTO array
+      const orgItems: OrganizationItemDTO[] = await Promise.all(
+        memberships.map(async (m) => {
+          let orgDetail = null;
+          let membersCount = 1;
+          let pendingRequestsCount = 0;
+
+          try {
+            const orgRes = await OrganizationApi.getById(m.organization_id);
+            if (orgRes.success && orgRes.data) {
+              orgDetail = orgRes.data;
+            }
+          } catch {
+            // Ignore individual fetch failure
+          }
+
+          // Count members
+          try {
+            const memRes = await OrganizationUserApi.getMembers(m.organization_id);
+            if (memRes.success && memRes.data) {
+              membersCount = memRes.data.length;
+            }
+          } catch {
+            // Ignore
+          }
+
+          // If manager/owner, fetch pending requests count
+          if (isManagerRole(m.role)) {
+            try {
+              const reqRes = await OrganizationJoinRequestApi.getOrgJoinRequests(
+                m.organization_id,
+                "PENDING"
+              );
+              if (reqRes.success && reqRes.data) {
+                pendingRequestsCount = reqRes.data.length;
+              }
+            } catch {
+              // Ignore
+            }
+          }
+
+          return {
+            id: m.organization_id,
+            name: orgDetail?.name || m.organization_name,
+            description: orgDetail?.description || "",
+            code: orgDetail?.code || m.organization_code,
+            privacy: orgDetail?.privacy || "PRIVATE",
+            creator_user_id: orgDetail?.creator_id || 0,
+            created_at: orgDetail?.created_at || m.joined_at,
+            user_role: m.role as OrganizationRole,
+            user_joined_at: m.joined_at,
+            creator_display_name: orgDetail?.creator?.display_name || orgDetail?.creator?.username || "Chủ nhiệm phòng",
+            creator_email: orgDetail?.creator?.email || "",
+            members_count: membersCount,
+            pending_requests_count: pendingRequestsCount,
+            theme_color: getThemeForOrg(m.organization_id),
+            is_pinned: false,
+          };
+        })
+      );
+
+      setOrganizations(orgItems);
+
+      // 3. Fetch all join requests for organizations managed by this user
+      const managedOrgIds = orgItems
+        .filter((o) => isManagerRole(o.user_role))
+        .map((o) => o.id);
+
+      const allRequests: OrganizationJoinRequestEntity[] = [];
+      await Promise.all(
+        managedOrgIds.map(async (orgId) => {
+          try {
+            const reqRes = await OrganizationJoinRequestApi.getOrgJoinRequests(orgId);
+            if (reqRes.success && reqRes.data) {
+              reqRes.data.forEach((r) => {
+                allRequests.push({
+                  id: r.id,
+                  organization_id: r.organization_id,
+                  message: r.message,
+                  creator_user_id: r.creator_user_id,
+                  creator_user_name: r.creator_display_name || r.creator_username,
+                  creator_user_email: r.creator_email,
+                  created_at: r.created_at,
+                  status: r.status,
+                  actor_user_id: r.actor_user_id,
+                  actor_username: r.actor_username,
+                  actor_display_name: r.actor_display_name,
+                  acted_at: r.acted_at,
+                  reject_reason: r.reject_reason,
+                });
+              });
+            }
+          } catch {
+            // Ignore
+          }
+        })
+      );
+
+      setJoinRequests(allRequests);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Không thể tải dữ liệu tổ chức.";
+      showToast(msg);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
   // Handlers for organization actions
-  const handleCreateOrg = (newOrgData: Omit<OrganizationItemDTO, "id">) => {
-    const newOrg: OrganizationItemDTO = {
-      ...newOrgData,
-      id: Date.now(),
-    };
-    setOrganizations((prev) => [newOrg, ...prev]);
-    showToast(`Đã tạo thành công tổ chức "${newOrg.name}" [Mã: ${newOrg.code}]!`);
+  const handleCreateOrg = async (newOrgData: Omit<OrganizationItemDTO, "id">) => {
+    try {
+      const res = await OrganizationApi.create({
+        name: newOrgData.name,
+        description: newOrgData.description,
+        code: newOrgData.code,
+        privacy: newOrgData.privacy,
+      });
+
+      if (res.success && res.data) {
+        showToast(`Đã tạo thành công tổ chức "${res.data.name}" [Mã: ${res.data.code}]!`);
+        await loadData();
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Tạo tổ chức thất bại.";
+      showToast(msg);
+    }
   };
 
-  const handleJoinOrg = (code: string, message?: string) => {
-    const upperCode = code.toUpperCase();
-    const existing = organizations.find((o) => o.code.toUpperCase() === upperCode);
+  const handleJoinOrg = async (code: string, message?: string) => {
+    try {
+      const res = await OrganizationJoinRequestApi.submitJoin({
+        code: code.trim().toUpperCase(),
+        message: message?.trim(),
+      });
 
-    if (existing) {
-      if (existing.user_role) {
-        showToast(`Bạn đã là thành viên của "${existing.name}".`);
-        setSelectedOrgId(existing.id);
-        return;
+      if (res.success && res.data) {
+        showToast(res.data.message || res.message);
+        await loadData();
       }
-    }
-
-    // Check if matching an existing known org or creating a join request
-    const targetOrg = organizations.find((o) => o.code.toUpperCase() === upperCode);
-
-    if (targetOrg) {
-      if (targetOrg.privacy === "PUBLIC") {
-        // Public -> Immediately join as MEMBER (organization_users table)
-        setOrganizations((prev) =>
-          prev.map((o) =>
-            o.id === targetOrg.id
-              ? {
-                  ...o,
-                  user_role: "MEMBER",
-                  user_joined_at: new Date().toISOString(),
-                  members_count: o.members_count + 1,
-                }
-              : o
-          )
-        );
-        showToast(`Tham gia thành công vào tổ chức "${targetOrg.name}"!`);
-      } else {
-        // Private -> Create a PENDING record in organization_join_requests table
-        const newRequest: OrganizationJoinRequestEntity = {
-          id: Date.now(),
-          organization_id: targetOrg.id,
-          message: message || "Xin gia nhập tổ chức.",
-          creator_user_id: user?.id || 1,
-          creator_user_name: user?.display_name || user?.username || "Nghiên cứu viên",
-          creator_user_email: user?.email || "user@edu.vn",
-          created_at: new Date().toISOString(),
-          status: "PENDING",
-        };
-
-        setJoinRequests((prev) => [newRequest, ...prev]);
-        setOrganizations((prev) =>
-          prev.map((o) =>
-            o.id === targetOrg.id
-              ? {
-                  ...o,
-                  pending_requests_count: (o.pending_requests_count || 0) + 1,
-                }
-              : o
-          )
-        );
-        showToast(
-          `Đã gửi yêu cầu gia nhập tới Ban quản lý tổ chức "${targetOrg.name}" (đang chờ duyệt).`
-        );
-      }
-    } else {
-      // Mock joining a new public organization via external code
-      const nowIso = new Date().toISOString();
-      const joinedOrg: OrganizationItemDTO = {
-        id: Date.now(),
-        name: `Tổ chức liên kết [${upperCode}]`,
-        description: message || "Tổ chức được thêm qua mã mời tham gia.",
-        code: upperCode,
-        privacy: "PUBLIC",
-        creator_user_id: 99,
-        created_at: nowIso,
-        user_role: "MEMBER",
-        user_joined_at: nowIso,
-        creator_display_name: "GS. Điều Phối Viên",
-        members_count: 12,
-        pending_requests_count: 0,
-        theme_color: "teal",
-      };
-
-      setOrganizations((prev) => [joinedOrg, ...prev]);
-      showToast(`Đã tham gia thành công vào tổ chức [Mã: ${upperCode}]!`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Tham gia tổ chức thất bại.";
+      showToast(msg);
     }
   };
 
@@ -164,95 +272,118 @@ function HomePage() {
   };
 
   const handleOpenRequestsModal = (org: OrganizationItemDTO) => {
-    setCurrentOrgForRequests(org);
-    setIsJoinRequestsModalOpen(true);
+    navigate(`/laboratories/${org.id}/requests`);
   };
 
-  const handleApproveRequest = (requestId: number) => {
-    const targetReq = joinRequests.find((r) => r.id === requestId);
-    if (!targetReq) return;
-
-    // Update request status to APPROVED (organization_join_requests table)
-    setJoinRequests((prev) =>
-      prev.map((r) =>
-        r.id === requestId
-          ? {
-              ...r,
-              status: "APPROVED",
-              actor_user_id: user?.id || 1,
-              acted_at: new Date().toISOString(),
-            }
-          : r
-      )
-    );
-
-    // Increase members_count & decrement pending_requests_count (organizations table)
-    setOrganizations((prev) =>
-      prev.map((o) =>
-        o.id === targetReq.organization_id
-          ? {
-              ...o,
-              members_count: o.members_count + 1,
-              pending_requests_count: Math.max(0, (o.pending_requests_count || 1) - 1),
-            }
-          : o
-      )
-    );
-
-    showToast(`Đã phê duyệt người dùng "${targetReq.creator_user_name}" vào tổ chức!`);
+  const handleOpenMembersModal = (org: OrganizationItemDTO) => {
+    navigate(`/laboratories/${org.id}/members`);
   };
 
-  const handleRejectRequest = (requestId: number, reason: string) => {
-    const targetReq = joinRequests.find((r) => r.id === requestId);
-    if (!targetReq) return;
-
-    // Update request status to REJECTED (organization_join_requests table)
-    setJoinRequests((prev) =>
-      prev.map((r) =>
-        r.id === requestId
-          ? {
-              ...r,
-              status: "REJECTED",
-              actor_user_id: user?.id || 1,
-              acted_at: new Date().toISOString(),
-              reject_reason: reason,
-            }
-          : r
-      )
-    );
-
-    // Decrement pending_requests_count
-    setOrganizations((prev) =>
-      prev.map((o) =>
-        o.id === targetReq.organization_id
-          ? {
-              ...o,
-              pending_requests_count: Math.max(0, (o.pending_requests_count || 1) - 1),
-            }
-          : o
-      )
-    );
-
-    showToast("Đã từ chối yêu cầu gia nhập.");
+  const handleOpenEditModal = (org: OrganizationItemDTO) => {
+    setCurrentOrgForEdit(org);
+    setIsEditModalOpen(true);
   };
+
+  const handleApproveRequest = async (requestId: number) => {
+    try {
+      const res = await OrganizationJoinRequestApi.approve(requestId);
+      if (res.success) {
+        showToast("Đã phê duyệt yêu cầu gia nhập thành công!");
+        await loadData();
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Phê duyệt thất bại.";
+      showToast(msg);
+    }
+  };
+
+  const handleRejectRequest = async (requestId: number, reason: string) => {
+    try {
+      const res = await OrganizationJoinRequestApi.reject(requestId, reason);
+      if (res.success) {
+        showToast("Đã từ chối yêu cầu gia nhập.");
+        await loadData();
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Từ chối yêu cầu thất bại.";
+      showToast(msg);
+    }
+  };
+
+  // If accessing a lab by URL directly that wasn't in organizations state yet, fetch it
+  useEffect(() => {
+    if (!selectedOrgId) {
+      setDirectOrg(null);
+      return;
+    }
+
+    const found = organizations.find((o) => o.id === selectedOrgId);
+    if (found) {
+      setDirectOrg(found);
+      return;
+    }
+
+    if (!isLoading && !found) {
+      OrganizationApi.getById(selectedOrgId)
+        .then(async (res) => {
+          if (res.success && res.data) {
+            const orgData = res.data;
+            let membersCount = 1;
+            let userRole: OrganizationRole = "MEMBER";
+
+            try {
+              const memRes = await OrganizationUserApi.getMembers(selectedOrgId);
+              if (memRes.success && memRes.data) {
+                membersCount = memRes.data.length;
+                const myMem = memRes.data.find((m) => m.user_id === user?.id);
+                if (myMem) {
+                  userRole = myMem.role;
+                }
+              }
+            } catch {
+              // Ignore
+            }
+
+            setDirectOrg({
+              id: orgData.id,
+              name: orgData.name,
+              description: orgData.description || "",
+              code: orgData.code,
+              privacy: orgData.privacy || "PRIVATE",
+              creator_user_id: orgData.creator_id || 0,
+              created_at: orgData.created_at,
+              user_role: userRole,
+              user_joined_at: orgData.created_at,
+              creator_display_name: orgData.creator?.display_name || orgData.creator?.username || "Chủ nhiệm phòng",
+              creator_email: orgData.creator?.email || "",
+              members_count: membersCount,
+              pending_requests_count: 0,
+              theme_color: getThemeForOrg(orgData.id),
+              is_pinned: false,
+            });
+          }
+        })
+        .catch(() => {
+          // Ignore
+        });
+    }
+  }, [selectedOrgId, organizations, isLoading, user?.id]);
+
+  // Currently accessed organization (when entering an organization)
+  const accessedOrg = useMemo(() => {
+    if (!selectedOrgId) return null;
+    return organizations.find((o) => o.id === selectedOrgId) || directOrg;
+  }, [organizations, selectedOrgId, directOrg]);
 
   // Filter & Search Logic
   const filteredOrganizations = useMemo(() => {
     return organizations
       .filter((org) => {
-        // Filter tab based on database schema role:
-        // Managed: OWNER, ORGANIZATION_MANAGER, LABORATORY_MANAGER
-        // Joined: MEMBER
         if (filterTab === "managed" && !isManagerRole(org.user_role)) return false;
         if (filterTab === "joined" && org.user_role !== "MEMBER") return false;
 
-        // Privacy filter: ALL, PUBLIC, PRIVATE
         if (privacyFilter !== "ALL" && org.privacy !== privacyFilter) return false;
 
-        // Selected from sidebar
-        if (selectedOrgId && org.id !== selectedOrgId) return false;
-
-        // Search query: name, code, creator, description
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase().trim();
           const matchName = org.name.toLowerCase().includes(q);
@@ -265,7 +396,6 @@ function HomePage() {
         return true;
       })
       .sort((a, b) => {
-        // Pinned always on top
         if (a.is_pinned && !b.is_pinned) return -1;
         if (!a.is_pinned && b.is_pinned) return 1;
 
@@ -276,7 +406,7 @@ function HomePage() {
         }
         return 0;
       });
-  }, [organizations, filterTab, privacyFilter, selectedOrgId, searchQuery, sortBy]);
+  }, [organizations, filterTab, privacyFilter, searchQuery, sortBy]);
 
   const managedCount = organizations.filter((o) => isManagerRole(o.user_role)).length;
   const joinedCount = organizations.filter((o) => o.user_role === "MEMBER").length;
@@ -299,6 +429,9 @@ function HomePage() {
         onSearchChange={setSearchQuery}
         onOpenCreateModal={() => setIsCreateModalOpen(true)}
         onOpenJoinModal={() => setIsJoinModalOpen(true)}
+        onNavigateHome={() => navigate("/")}
+        onNavigateSettings={() => navigate("/settings")}
+        onNavigateProfile={() => navigate("/profile")}
       />
 
       {/* Main Container with Left Sidebar & Right Grid */}
@@ -309,12 +442,25 @@ function HomePage() {
           isOpen={isSidebarOpen}
           onCloseMobile={() => setIsSidebarOpen(false)}
           selectedOrgId={selectedOrgId}
-          onSelectOrg={(id) => {
-            setSelectedOrgId(id);
-            setFilterTab("all");
+          onSelectOrg={(orgId) => {
+            if (orgId) {
+              navigate(`/laboratories/${orgId}`);
+            } else {
+              navigate("/");
+            }
           }}
           activeView={activeView}
-          onSelectView={setActiveView}
+          onSelectView={(view) => {
+            if (view === "requests") {
+              navigate("/requests");
+            } else if (view === "settings") {
+              navigate("/settings");
+            } else if (view === "profile") {
+              navigate("/profile");
+            } else {
+              navigate("/");
+            }
+          }}
           totalPendingRequests={totalPendingRequests}
         />
 
@@ -336,7 +482,7 @@ function HomePage() {
               <div className="flex items-center justify-between pb-4 border-b border-slate-100">
                 <div>
                   <h1 className="text-xl font-bold text-slate-900">
-                    Quản lý yêu cầu gia nhập (organization_join_requests)
+                    Quản lý yêu cầu gia nhập
                   </h1>
                   <p className="text-sm text-slate-500">
                     Danh sách người dùng xin tham gia các tổ chức mà bạn quản lý
@@ -344,8 +490,8 @@ function HomePage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setActiveView("all")}
-                  className="rounded-xl border border-slate-200 px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={() => navigate("/")}
+                  className="rounded-xl border border-slate-200 px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
                 >
                   ← Về danh sách tổ chức
                 </button>
@@ -377,7 +523,7 @@ function HomePage() {
                                 Tổ chức: {org?.name} [{org?.code}]
                               </div>
                               <div className="text-xs text-slate-600 mt-1 italic bg-white p-2 rounded border border-slate-100">
-                                "{req.message}"
+                                "{req.message || "Không có lời nhắn đi kèm."}"
                               </div>
                             </div>
                           </div>
@@ -420,8 +566,8 @@ function HomePage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setActiveView("all")}
-                  className="rounded-xl border border-slate-200 px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={() => navigate("/")}
+                  className="rounded-xl border border-slate-200 px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
                 >
                   ← Về danh sách tổ chức
                 </button>
@@ -440,7 +586,7 @@ function HomePage() {
 
                 <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                   <div>
-                    <div className="text-sm font-semibold text-slate-800">Thông báo khi có yêu cầu mới (organization_join_requests)</div>
+                    <div className="text-sm font-semibold text-slate-800">Thông báo khi có yêu cầu mới</div>
                     <div className="text-xs text-slate-500">
                       Hiển thị biểu tượng badge số lượng yêu cầu trên thẻ tổ chức và sidebar
                     </div>
@@ -451,174 +597,214 @@ function HomePage() {
             </div>
           )}
 
-          {/* View: All Organizations (Main Google Classroom Grid) */}
+          {/* View: User Profile Management */}
+          {activeView === "profile" && (
+            <ProfileView
+              onBack={() => navigate("/")}
+              onShowToast={showToast}
+            />
+          )}
+
+          {/* View: All Organizations or Accessed Organization Content */}
           {activeView === "all" && (
-            <div className="space-y-6">
-              {/* Header Toolbar: Filter Tabs & Sorting */}
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-                      {selectedOrgId
-                        ? "Chi tiết tổ chức đã chọn"
-                        : "Tất cả tổ chức & Phòng thí nghiệm"}
-                    </h1>
-                    {selectedOrgId && (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedOrgId(null)}
-                        className="rounded-lg bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 hover:bg-slate-200 transition"
-                      >
-                        Bỏ chọn
-                      </button>
-                    )}
-                  </div>
-                  <p className="mt-1 text-xs sm:text-sm text-slate-500">
-                    Phân loại theo vai trò (role) và phạm vi truy cập (privacy: PUBLIC, PRIVATE)
-                  </p>
+            selectedOrgId !== null ? (
+              isLoading && !accessedOrg ? (
+                <div className="flex flex-col items-center justify-center py-20 text-slate-400 space-y-3">
+                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
+                  <p className="text-xs font-medium">Đang tải thông tin tổ chức...</p>
                 </div>
-
-                {/* Filter Controls */}
-                <div className="flex flex-wrap items-center gap-2">
-                  {/* Segmented Role Tabs: All, Managed (OWNER/MANAGER), Joined (MEMBER) */}
-                  <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200/80">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFilterTab("all");
-                        setSelectedOrgId(null);
-                      }}
-                      className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                        filterTab === "all" && !selectedOrgId
-                          ? "bg-white text-slate-900 shadow-xs"
-                          : "text-slate-600 hover:text-slate-900"
-                      }`}
-                    >
-                      Tất cả ({organizations.length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFilterTab("managed");
-                        setSelectedOrgId(null);
-                      }}
-                      className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                        filterTab === "managed"
-                          ? "bg-white text-emerald-800 shadow-xs"
-                          : "text-slate-600 hover:text-slate-900"
-                      }`}
-                    >
-                      Đang quản lý ({managedCount})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFilterTab("joined");
-                        setSelectedOrgId(null);
-                      }}
-                      className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                        filterTab === "joined"
-                          ? "bg-white text-emerald-800 shadow-xs"
-                          : "text-slate-600 hover:text-slate-900"
-                      }`}
-                    >
-                      Đã tham gia ({joinedCount})
-                    </button>
-                  </div>
-
-                  {/* Privacy Filter Dropdown (PUBLIC / PRIVATE) */}
-                  <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5">
-                    <span className="text-[11px] font-semibold text-slate-400">Phạm vi:</span>
-                    <select
-                      value={privacyFilter}
-                      onChange={(e) => setPrivacyFilter(e.target.value as OrganizationPrivacy | "ALL")}
-                      className="bg-transparent text-xs font-medium text-slate-700 focus:outline-none cursor-pointer"
-                    >
-                      <option value="ALL">Tất cả</option>
-                      <option value="PUBLIC">PUBLIC (Công khai)</option>
-                      <option value="PRIVATE">PRIVATE (Riêng tư)</option>
-                    </select>
-                  </div>
-
-                  {/* Sort Dropdown */}
-                  <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5">
-                    <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" />
-                    </svg>
-                    <select
-                      value={sortBy}
-                      onChange={(e) => setSortBy(e.target.value as SortOption)}
-                      className="bg-transparent text-xs font-medium text-slate-700 focus:outline-none cursor-pointer"
-                    >
-                      <option value="name">Tên tổ chức A-Z</option>
-                      <option value="members">Nhiều thành viên nhất</option>
-                      <option value="joined_at">Mới tham gia gần đây</option>
-                    </select>
-                  </div>
-
-                  {/* Quick Action Button */}
-                  <button
-                    type="button"
-                    onClick={() => setIsCreateModalOpen(true)}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition"
-                  >
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                    </svg>
-                    <span>Tạo tổ chức</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Grid of Google Classroom style Organization Cards */}
-              {filteredOrganizations.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
-                  {filteredOrganizations.map((org) => (
-                    <OrganizationCard
-                      key={org.id}
-                      organization={org}
-                      onEnter={(o) => showToast(`Đang truy cập vào tổ chức: ${o.name}...`)}
-                      onCopyCode={handleCopyCode}
-                      onViewRequests={handleOpenRequestsModal}
-                      onTogglePin={handleTogglePin}
-                    />
-                  ))}
-                </div>
+              ) : accessedOrg ? (
+                <OrganizationDetailView
+                  organization={accessedOrg}
+                  currentUser={user}
+                  activeTab={activeTab}
+                  onTabChange={(newTab) => {
+                    if (newTab === "overview") {
+                      navigate(`/laboratories/${accessedOrg.id}`);
+                    } else {
+                      navigate(`/laboratories/${accessedOrg.id}/${newTab}`);
+                    }
+                  }}
+                  onBack={() => navigate("/")}
+                  onShowToast={showToast}
+                  onRefreshOrg={loadData}
+                  onEditOrg={handleOpenEditModal}
+                  onViewRequests={handleOpenRequestsModal}
+                />
               ) : (
                 <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-white p-12 text-center">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 mb-4">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 mb-4">
                     <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" strokeWidth="1.75" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
                     </svg>
                   </div>
-                  <h3 className="text-base font-bold text-slate-800">Không tìm thấy tổ chức phù hợp</h3>
+                  <h3 className="text-base font-bold text-slate-800">Không tìm thấy tổ chức</h3>
                   <p className="mt-1 text-xs sm:text-sm text-slate-500 max-w-md">
-                    Không có tổ chức nào khớp với bộ lọc vai trò, phạm vi truy cập hoặc từ khóa tìm kiếm.
+                    Tổ chức với mã số #{selectedOrgId} không tồn tại hoặc bạn chưa được thêm vào tổ chức này.
                   </p>
-                  <div className="mt-5 flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSearchQuery("");
-                        setFilterTab("all");
-                        setPrivacyFilter("ALL");
-                        setSelectedOrgId(null);
-                      }}
-                      className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                    >
-                      Xóa bộ lọc
-                    </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate("/")}
+                    className="mt-5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700 transition"
+                  >
+                    ← Quay lại danh sách tổ chức
+                  </button>
+                </div>
+              )
+            ) : (
+              <div className="space-y-6">
+                {/* Header Toolbar: Filter Tabs & Sorting */}
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+                        Tất cả tổ chức & Phòng thí nghiệm
+                      </h1>
+                    </div>
+                    <p className="mt-1 text-xs sm:text-sm text-slate-500">
+                      Phân loại theo vai trò và phạm vi truy cập
+                    </p>
+                  </div>
+
+                  {/* Filter Controls */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Segmented Role Tabs */}
+                    <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200/80">
+                      <button
+                        type="button"
+                        onClick={() => setFilterTab("all")}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                          filterTab === "all"
+                            ? "bg-white text-slate-900 shadow-xs"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        Tất cả ({organizations.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFilterTab("managed")}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                          filterTab === "managed"
+                            ? "bg-white text-emerald-800 shadow-xs"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        Đang quản lý ({managedCount})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFilterTab("joined")}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                          filterTab === "joined"
+                            ? "bg-white text-emerald-800 shadow-xs"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        Đã tham gia ({joinedCount})
+                      </button>
+                    </div>
+
+                    {/* Privacy Filter Dropdown (PUBLIC / PRIVATE) */}
+                    <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5">
+                      <span className="text-[11px] font-semibold text-slate-400">Phạm vi:</span>
+                      <select
+                        value={privacyFilter}
+                        onChange={(e) => setPrivacyFilter(e.target.value as OrganizationPrivacy | "ALL")}
+                        className="bg-transparent text-xs font-medium text-slate-700 focus:outline-none cursor-pointer"
+                      >
+                        <option value="ALL">Tất cả</option>
+                        <option value="PUBLIC">Công khai</option>
+                        <option value="PRIVATE">Riêng tư</option>
+                      </select>
+                    </div>
+
+                    {/* Sort Dropdown */}
+                    <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5">
+                      <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" />
+                      </svg>
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value as SortOption)}
+                        className="bg-transparent text-xs font-medium text-slate-700 focus:outline-none cursor-pointer"
+                      >
+                        <option value="name">Tên tổ chức A-Z</option>
+                        <option value="members">Nhiều thành viên nhất</option>
+                        <option value="joined_at">Mới tham gia gần đây</option>
+                      </select>
+                    </div>
+
+                    {/* Quick Action Button */}
                     <button
                       type="button"
                       onClick={() => setIsCreateModalOpen(true)}
-                      className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition"
                     >
-                      + Tạo tổ chức mới
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                      </svg>
+                      <span>Tạo tổ chức</span>
                     </button>
                   </div>
                 </div>
-              )}
-            </div>
+
+                {/* Grid or Loading / Empty */}
+                {isLoading ? (
+                  <div className="flex flex-col items-center justify-center py-20 text-slate-400 space-y-3">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
+                    <p className="text-xs font-medium">Đang tải danh sách tổ chức...</p>
+                  </div>
+                ) : filteredOrganizations.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
+                    {filteredOrganizations.map((org) => (
+                      <OrganizationCard
+                        key={org.id}
+                        organization={org}
+                        onEnter={(o) => navigate(`/laboratories/${o.id}`)}
+                        onCopyCode={handleCopyCode}
+                        onViewRequests={handleOpenRequestsModal}
+                        onViewMembers={handleOpenMembersModal}
+                        onEditOrg={handleOpenEditModal}
+                        onTogglePin={handleTogglePin}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-white p-12 text-center">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 mb-4">
+                      <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" strokeWidth="1.75" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-base font-bold text-slate-800">Không tìm thấy tổ chức phù hợp</h3>
+                    <p className="mt-1 text-xs sm:text-sm text-slate-500 max-w-md">
+                      Không có tổ chức nào khớp với bộ lọc vai trò, phạm vi truy cập hoặc từ khóa tìm kiếm.
+                    </p>
+                    <div className="mt-5 flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchQuery("");
+                          setFilterTab("all");
+                          setPrivacyFilter("ALL");
+                        }}
+                        className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        Xóa bộ lọc
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsCreateModalOpen(true)}
+                        className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
+                      >
+                        + Tạo tổ chức mới
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
           )}
         </main>
       </div>
@@ -648,6 +834,19 @@ function HomePage() {
         requests={joinRequests}
         onApprove={handleApproveRequest}
         onReject={handleRejectRequest}
+      />
+
+      {/* Organization Configuration & Deletion Modal */}
+      <EditOrgModal
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setCurrentOrgForEdit(null);
+        }}
+        organization={currentOrgForEdit}
+        onShowToast={showToast}
+        onOrgUpdated={loadData}
+        onOrgDeleted={loadData}
       />
     </div>
   );

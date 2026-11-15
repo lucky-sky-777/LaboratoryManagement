@@ -70,6 +70,10 @@ public class User implements UserDetails {
 	@Column(name = "email", nullable = true)
 	String email;
 
+	@Column(name = "email_verified", nullable = false)
+	@Builder.Default
+	Boolean emailVerified = false;
+
 	@Column(name = "joined_at", nullable = false, insertable = false, updatable = false)
 	Instant joinedAt;
 
@@ -77,6 +81,9 @@ public class User implements UserDetails {
 	public void prePersist() {
 		if (provider == null) {
 			provider = Provider.INTERNAL;
+		}
+		if (emailVerified == null) {
+			emailVerified = false;
 		}
 	}
 

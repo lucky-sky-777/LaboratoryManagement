@@ -81,4 +81,16 @@ public class OrganizationUser {
 		}
 	}
 
+	public void updateRole(Role role) {
+		this.role = role;
+	}
+
+	public static OrganizationUser create(Organization organization, User user, Role role) {
+		return OrganizationUser.builder()
+				.organization(organization)
+				.user(user)
+				.role(role)
+				.build();
+	}
+
 }
